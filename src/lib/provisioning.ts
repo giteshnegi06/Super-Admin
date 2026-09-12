@@ -6,17 +6,15 @@
  *
  * Each step updates `provisionStatus` so the UI can poll progress.
  */
-import { readFile } from "fs/promises";
-import path from "path";
 import type { ProvisionStatus } from "@prisma/client";
 import { prisma } from "./db";
 import { encrypt, decrypt } from "./crypto";
 import { logActivity } from "./auth";
 import { currencyByCode } from "./currencies";
 import { hashPassword, generatePassword } from "./tenant-auth";
+import { TENANT_SCHEMA_SQL } from "./tenant-schema";
 import { adminSql, adminDbName, assertSafeDbName, connect, connectionStringFor, runSqlScript, type Sql } from "./tenant-db";
 
-const SCHEMA_PATH = path.join(process.cwd(), "src", "lib", "tenant-schema.sql");
 
 async function setStatus(clientId: string, provisionStatus: ProvisionStatus, extra: Record<string, unknown> = {}) {
   await prisma.client.update({ where: { id: clientId }, data: { provisionStatus, ...extra } });
@@ -62,7 +60,7 @@ export async function provisionClient(clientId: string, opts: { adminId?: string
     // 2. Apply the product schema -----------------------------------------
     await setStatus(clientId, "RUNNING_MIGRATIONS");
     const sql = connect(connectionUri);
-    await runSqlScript(sql, await readFile(SCHEMA_PATH, "utf8"));
+    await runSqlScript(sql, TENANT_SCHEMA_SQL);
 
     // 3. Seed the single cafe row, owner admin and starter tables ------------
     await setStatus(clientId, "SEEDING");

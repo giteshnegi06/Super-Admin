@@ -7,7 +7,7 @@ import type { AdminRole, Prisma } from "@prisma/client";
 
 export const SESSION_COOKIE = "sa_session";
 const SESSION_TTL_SEC = 60 * 60 * 24 * 7; // 7 days
-const secret = new TextEncoder().encode(env.SESSION_SECRET);
+const secret = () => new TextEncoder().encode(env.SESSION_SECRET);
 
 export type Session = { sub: string; email: string; name: string; role: AdminRole };
 
@@ -20,7 +20,7 @@ export async function createSession(user: Session) {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_TTL_SEC}s`)
-    .sign(secret);
+    .sign(secret());
 
   cookies().set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -39,7 +39,7 @@ export async function getSession(): Promise<Session | null> {
   const token = cookies().get(SESSION_COOKIE)?.value;
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, secret());
     const s = payload as unknown as Session;
     // A deleted/deactivated admin must lose access immediately, not when the JWT expires.
     const user = await prisma.adminUser.findUnique({ where: { id: s.sub }, select: { isActive: true, role: true, name: true, email: true } });

@@ -2,6 +2,8 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { ClientForm } from "@/components/client-form";
 
+export const dynamic = "force-dynamic";
+
 export default function NewClientPage() {
   return (
     <>

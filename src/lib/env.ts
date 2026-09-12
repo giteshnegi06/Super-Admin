@@ -1,3 +1,8 @@
+/**
+ * Environment access. Values are read lazily so a missing variable fails at
+ * request time with a clear message instead of crashing `next build`
+ * (Vercel's "Collecting page data" step imports server modules with no env).
+ */
 function required(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`Missing required env var: ${name}`);
@@ -5,9 +10,9 @@ function required(name: string): string {
 }
 
 export const env = {
-  DATABASE_URL: required("DATABASE_URL"),
-  SESSION_SECRET: required("SESSION_SECRET"),
-  ENCRYPTION_KEY: required("ENCRYPTION_KEY"),
-  NEON_PROJECT_ID: process.env.NEON_PROJECT_ID ?? "",
-  CLIENT_APP_URL: process.env.CLIENT_APP_URL ?? "http://localhost:3001",
+  get DATABASE_URL() { return required("DATABASE_URL"); },
+  get SESSION_SECRET() { return required("SESSION_SECRET"); },
+  get ENCRYPTION_KEY() { return required("ENCRYPTION_KEY"); },
+  get NEON_PROJECT_ID() { return process.env.NEON_PROJECT_ID ?? ""; },
+  get CLIENT_APP_URL() { return process.env.CLIENT_APP_URL ?? "http://localhost:3001"; },
 };

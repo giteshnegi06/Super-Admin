@@ -21,7 +21,7 @@ Neon project "square-shadow-18088269" (one endpoint, many databases)
 * **Cafe DB** – one database per cafe *inside the same Neon project*, exactly
   like `QR-Order` for Negi's Kitchen. Created with `CREATE DATABASE` (the
   `neondb_owner` role has CREATEDB, so no Neon API key is needed), then
-  `src/lib/tenant-schema.sql` — a 1:1 copy of the live product schema — is
+  `src/lib/tenant-schema.ts` — a 1:1 copy of the live product schema — is
   applied and the single `cafes` row, owner `admin_users` row and
   `Table 01…N` rows are seeded. The connection string is stored AES-256-GCM
   encrypted on the `Client` row.
@@ -56,7 +56,7 @@ admin/
     │   ├── crypto.ts         # encrypt tenant connection strings
     │   ├── neon.ts           # Neon API v2 client (create/delete project)
     │   ├── provisioning.ts   # pipeline: Neon project → schema → seed
-    │   ├── tenant-schema.sql # schema applied to every cafe DB
+    │   ├── tenant-schema.ts # schema applied to every cafe DB
     │   ├── validations.ts    # zod schemas
     │   ├── format.ts
     │   └── cn.ts
@@ -116,7 +116,7 @@ Open http://localhost:3100 → sign in → **Add cafe** (port 3100 so it never c
 
 1. Inserts a `Client` row (`provisionStatus = PENDING`).
 2. `CREATE DATABASE "cafe_<slug>"` on the Neon endpoint. (`CREATING_DATABASE`)
-3. Applies `tenant-schema.sql` statement by statement. (`RUNNING_MIGRATIONS`)
+3. Applies `tenant-schema.ts` statement by statement. (`RUNNING_MIGRATIONS`)
 4. Seeds `cafes` (id = slug), `admin_users` (owner) and N `tables`. (`SEEDING`)
 5. Marks `READY`; the detail page polls `/api/clients/[id]/status` every 2s.
    Failures land in `FAILED` with the error shown and a **Retry** button.
@@ -141,6 +141,6 @@ npm run client:import -- --db QR-Order --slug negis-kitchen --owner "Gitesh Negi
 ## Updating the tenant schema later
 
 Add `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
-statements to `tenant-schema.sql`, bump `schema_version`, then press
+statements to `tenant-schema.ts`, bump `schema_version`, then press
 **Re-run schema** on each client (or loop over clients with a script calling
 `provisionClient`).
