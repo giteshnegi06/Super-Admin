@@ -11,7 +11,7 @@ import { prisma } from "./db";
 import { encrypt, decrypt } from "./crypto";
 import { logActivity } from "./auth";
 import { currencyByCode } from "./currencies";
-import { hashPassword, generatePassword } from "./tenant-auth";
+import { hashPassword, generatePassword, verifyPassword } from "./tenant-auth";
 import { TENANT_SCHEMA_SQL } from "./tenant-schema";
 import { adminSql, adminDbName, assertSafeDbName, connect, connectionStringFor, runSqlScript, type Sql } from "./tenant-db";
 
@@ -199,4 +199,26 @@ export async function resetOwnerPassword(clientId: string, opts: { adminId?: str
   const creds = await ensureOwnerLogin(sql, client, { reset: true });
   await logActivity("client.owner_password_reset", { clientId, adminId: opts.adminId });
   return creds;
+}
+
+export type OwnerLoginStatus =
+  | { state: "missing" }                          // no admin_users row / no hash in the cafe DB
+  | { state: "ok"; password: string }             // admin's stored password matches the cafe DB
+  | { state: "changed_in_app"; hasStored: boolean }; // owner changed it from their console
+
+/**
+ * Compare the password the admin holds with the live hash in the cafe DB.
+ * Read on every render so a password changed from the cafe console is
+ * reported instead of silently showing a stale value.
+ */
+export async function ownerLoginStatus(client: {
+  dbConnectionEncrypted: string | null; ownerEmail: string; ownerPasswordEncrypted: string | null;
+}): Promise<OwnerLoginStatus> {
+  if (!client.dbConnectionEncrypted) return { state: "missing" };
+  const sql = connect(decrypt(client.dbConnectionEncrypted));
+  const [row] = await sql.query(`SELECT password_hash FROM admin_users WHERE email = $1`, [client.ownerEmail.toLowerCase()]);
+  if (!row?.password_hash) return { state: "missing" };
+  if (!client.ownerPasswordEncrypted) return { state: "changed_in_app", hasStored: false };
+  const password = decrypt(client.ownerPasswordEncrypted);
+  return verifyPassword(password, row.password_hash) ? { state: "ok", password } : { state: "changed_in_app", hasStored: true };
 }

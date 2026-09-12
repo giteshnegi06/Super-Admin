@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { decrypt, maskConnectionString } from "@/lib/crypto";
 import { cafeMetrics, type CafeMetrics } from "@/lib/metrics";
+import { ownerLoginStatus, type OwnerLoginStatus } from "@/lib/provisioning";
 import { formatDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -33,7 +34,11 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
     try { metrics = await cafeMetrics(client.id); } catch (e) { metricsError = e instanceof Error ? e.message : String(e); }
   }
   const connStr = client.dbConnectionEncrypted ? decrypt(client.dbConnectionEncrypted) : null;
-  const ownerPassword = client.ownerPasswordEncrypted ? decrypt(client.ownerPasswordEncrypted) : null;
+  // Checked live against the cafe DB so a password changed from the cafe console is never shown stale
+  let login: OwnerLoginStatus = { state: "missing" };
+  if (client.provisionStatus === "READY") {
+    try { login = await ownerLoginStatus(client); } catch { login = { state: "missing" }; }
+  }
   const loginUrl = client.appUrl ? `${client.appUrl.replace(/\/$/, "")}/admin` : null;
   const isSuper = session?.role === "SUPER_ADMIN";
 
@@ -73,7 +78,7 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
                 action={
                   <ConfirmButton size="sm" variant="secondary" action={resetOwnerPasswordAction.bind(null, client.id)}
                     confirm="Generate a new password? The old one will stop working immediately.">
-                    <KeyRound size={14} /> {ownerPassword ? "Reset password" : "Generate login"}
+                    <KeyRound size={14} /> {login.state === "missing" ? "Generate login" : "Reset password"}
                   </ConfirmButton>
                 }
               />
@@ -94,14 +99,20 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
                   <div>
                     <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-500">Password</dt>
                     <dd className="mt-1">
-                      {ownerPassword
-                        ? <SecretField value={ownerPassword} secret />
-                        : <span className="text-sm text-ink-400">Not generated yet</span>}
+                      {login.state === "ok" && <SecretField value={login.password} secret />}
+                      {login.state === "missing" && <span className="text-sm text-ink-400">Not generated yet</span>}
+                      {login.state === "changed_in_app" && (
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-600/20">
+                          Changed by the owner in their console
+                        </span>
+                      )}
                     </dd>
                   </div>
                 </dl>
                 <p className="mt-3 text-xs text-ink-500">
-                  Role: <b>Admin</b> · set {formatDateTime(client.ownerPasswordSetAt)}. The owner can add kitchen staff logins from their own admin console.
+                  {login.state === "changed_in_app"
+                    ? <>The cafe database only keeps a one-way hash, so the new password can't be read here. Use <b>Reset password</b> to issue a fresh one the owner can use.</>
+                    : <>Role: <b>Admin</b> · set {formatDateTime(client.ownerPasswordSetAt)}. The owner can change it or add kitchen staff logins from their own console.</>}
                 </p>
               </CardBody>
             </Card>
