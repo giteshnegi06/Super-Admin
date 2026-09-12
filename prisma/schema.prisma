@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Super-admin users (you and your team)
+// ─────────────────────────────────────────────────────────────────────
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         AdminRole @default(ADMIN)
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  activityLogs ActivityLog[]
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  SUPPORT
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Clients = cafes / restaurants that bought the system (one row = one tenant)
+// ─────────────────────────────────────────────────────────────────────
+model Client {
+  id          String  @id @default(cuid())
+  slug        String  @unique // used in URLs: order.app/{slug}
+  cafeName    String
+  ownerName   String
+  ownerEmail  String
+  ownerPhone  String?
+  address     String?
+  city        String?
+  state       String?
+  country     String  @default("India")
+  logoUrl     String?
+  gstNumber   String?
+  tagline     String?
+  timeZone    String  @default("Asia/Kolkata")
+  // ISO 4217 code; its symbol is written to the cafe DB (cafes.currency)
+  currency    String  @default("INR")
+  initialTables Int   @default(10)
+  // Where this cafe's copy of the QR-Ordering app is deployed (Vercel URL)
+  appUrl      String?
+
+  status  ClientStatus @default(ACTIVE)
+  notes   String?
+
+  // ── Tenant database (a database inside the shared Neon project) ──
+  provisionStatus     ProvisionStatus @default(PENDING)
+  provisionError      String?
+  // cafes.id inside the tenant DB (the app reads the single cafes row)
+  cafeId              String?
+  dbName              String?  @unique
+  neonProjectId       String?
+  neonEndpointHost    String?
+  dbRoleName          String?
+  // AES-256-GCM encrypted connection string (see src/lib/crypto.ts)
+  dbConnectionEncrypted String?
+  // Cafe-admin login for the QR-Ordering app: email = ownerEmail, password kept
+  // AES-256-GCM encrypted so a super admin can reveal / re-share it
+  ownerPasswordEncrypted String?
+  ownerPasswordSetAt     DateTime?
+  provisionedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activityLogs ActivityLog[]
+
+  @@index([status])
+  @@index([provisionStatus])
+}
+
+enum ClientStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum ProvisionStatus {
+  PENDING
+  CREATING_DATABASE
+  RUNNING_MIGRATIONS
+  SEEDING
+  READY
+  FAILED
+  DELETING
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Audit log of everything done in the super admin
+// ─────────────────────────────────────────────────────────────────────
+model ActivityLog {
+  id        String   @id @default(cuid())
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  adminId   String?
+  admin     AdminUser? @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  action    String   // e.g. client.created, client.provisioned, client.suspended
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([clientId])
+  @@index([createdAt])
+}

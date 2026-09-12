@@ -1,0 +1,20 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  body { @apply bg-ink-50 font-sans text-ink-900; }
+  ::selection { @apply bg-brand-200 text-ink-900; }
+  h1, h2, h3 { @apply tracking-tight; }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+
+@layer components {
+  .table-head { @apply bg-ink-50/70 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-500; }
+  .table-head th { @apply px-5 py-3 font-semibold; }
+  .table-row { @apply transition-colors hover:bg-ink-50/60; }
+  .table-row td { @apply px-5 py-3.5 align-middle; }
+}
