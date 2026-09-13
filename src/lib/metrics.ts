@@ -26,6 +26,8 @@ export type CafeMetrics = {
   last30Days: DayPoint[];
   months: MonthPoint[]; // from the cafe's first month (creation or first order) to the current month
   latencyMs: number;
+  /** Platform cut on this cafe's orders — undefined when the super admin has it turned off. */
+  commission?: { percent: number; today: number; thisMonth: number; allTime: number };
 };
 
 const REVENUE = `sum(subtotal + COALESCE(service_charge, 0))::numeric`;
@@ -118,6 +120,14 @@ export async function cafeMetrics(clientId: string): Promise<CafeMetrics | null>
     last30Days: days.map((r) => ({ date: r.date, orders: r.orders, revenue: Number(r.revenue) })),
     months: months.map((r) => ({ month: r.month, orders: r.orders, revenue: Number(r.revenue) })),
     latencyMs: Date.now() - start,
+    commission: client.commissionEnabled
+      ? {
+          percent: client.commissionPercent,
+          today: Number(s.today_rev) * (client.commissionPercent / 100),
+          thisMonth: Number(s.month_rev) * (client.commissionPercent / 100),
+          allTime: Number(s.all_rev) * (client.commissionPercent / 100),
+        }
+      : undefined,
   };
 }
 
@@ -128,12 +138,13 @@ export type CafeSnapshot = {
   monthRevenue: number; monthOrders: number;
   tables: number; activeOrders: number;
   currency: string; // symbol from cafes.currency
+  todayCommission: number; monthCommission: number; // 0 when the cut is turned off
   error?: string;
 };
 
 export async function cafeSnapshot(clientId: string): Promise<CafeSnapshot> {
   const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
-  const empty: CafeSnapshot = { clientId, todayRevenue: 0, todayOrders: 0, monthRevenue: 0, monthOrders: 0, tables: 0, activeOrders: 0, currency: "₹" };
+  const empty: CafeSnapshot = { clientId, todayRevenue: 0, todayOrders: 0, monthRevenue: 0, monthOrders: 0, tables: 0, activeOrders: 0, currency: "₹", todayCommission: 0, monthCommission: 0 };
   if (!client.dbConnectionEncrypted || client.provisionStatus !== "READY") return empty;
   try {
     const sql = connect(decrypt(client.dbConnectionEncrypted));
@@ -152,11 +163,13 @@ export async function cafeSnapshot(clientId: string): Promise<CafeSnapshot> {
        FROM o, today`,
       [tz],
     );
+    const pct = client.commissionEnabled ? client.commissionPercent / 100 : 0;
     return {
       clientId,
       todayRevenue: Number(r.today_rev), todayOrders: r.today_orders,
       monthRevenue: Number(r.month_rev), monthOrders: r.month_orders,
       tables: r.tables, activeOrders: r.active_orders, currency: r.currency ?? "₹",
+      todayCommission: Number(r.today_rev) * pct, monthCommission: Number(r.month_rev) * pct,
     };
   } catch (e) {
     return { ...empty, error: e instanceof Error ? e.message : String(e) };

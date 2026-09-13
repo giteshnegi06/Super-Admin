@@ -1,10 +1,10 @@
-import { IndianRupee, CalendarDays, History, Sigma, Armchair, Flame, UtensilsCrossed, Power } from "lucide-react";
+import { IndianRupee, CalendarDays, History, Sigma, Armchair, UtensilsCrossed, Power, Percent } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { RevenueBars } from "@/components/revenue-chart";
 import type { CafeMetrics } from "@/lib/metrics";
 import { cn } from "@/lib/cn";
-import { money } from "@/lib/currencies";
+import { money, moneyPrecise } from "@/lib/currencies";
 function Delta({ cur, prev }: { cur: number; prev: number }) {
   if (prev === 0) return null;
   const pct = Math.round(((cur - prev) / prev) * 100);
@@ -23,9 +23,11 @@ export function CafeMetricsPanel({ m }: { m: CafeMetrics }) {
     { label: "Last month", value: money(m.lastMonth.revenue, c), sub: `${m.lastMonth.orders} orders`, icon: History },
     { label: "All time", value: money(m.allTime.revenue, c), sub: `${m.allTime.orders} orders`, icon: Sigma },
     { label: "Tables", value: m.tables.total, sub: `${m.tables.occupied} occupied · ${m.tables.available} free`, icon: Armchair },
-    { label: "Active orders", value: m.activeOrders, sub: "not yet served", icon: Flame },
     { label: "Menu items", value: m.menu.items, sub: `${m.menu.available} available · ${m.menu.categories} categories`, icon: UtensilsCrossed },
     { label: "Ordering", value: m.cafe.isAcceptingOrders ? "Open" : "Paused", sub: `cafe id · ${m.cafe.id}`, icon: Power },
+    ...(m.commission
+      ? [{ label: "Your cut", value: moneyPrecise(m.commission.thisMonth, c), sub: `${m.commission.percent}% · this month`, icon: Percent }]
+      : []),
   ];
   return (
     <div className="space-y-6">

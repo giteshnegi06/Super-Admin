@@ -11,6 +11,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ClientStatusBadge } from "@/components/ui/badge";
 import { ProvisionStatusLive } from "@/components/provision-status";
 import { ClientForm } from "@/components/client-form";
+import { CommissionForm } from "@/components/commission-form";
 import { ConfirmButton } from "@/components/confirm-button";
 import { CopyButton } from "@/components/copy-button";
 import { CafeMetricsPanel } from "@/components/cafe-metrics";
@@ -191,6 +192,13 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
         </div>
 
         <div className="space-y-6">
+          {isSuper && (
+            <Card>
+              <CardHeader title="Platform commission" description="Your cut of this cafe's orders" />
+              <CardBody><CommissionForm client={client} /></CardBody>
+            </Card>
+          )}
+
           <Card>
             <CardHeader title="Actions" />
             <CardBody className="flex flex-col gap-2">

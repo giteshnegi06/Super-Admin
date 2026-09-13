@@ -60,6 +60,12 @@ export function money(amount: number, symbol = "₹"): string {
   return `${symbol}${Math.round(amount).toLocaleString(cur?.locale ?? "en-IN")}`;
 }
 
+/** Same as `money`, but keeps up to 2 decimal places instead of rounding to a whole unit — e.g. "₹6.75". */
+export function moneyPrecise(amount: number, symbol = "₹"): string {
+  const cur = CURRENCIES.find((c) => c.symbol === symbol);
+  return `${symbol}${amount.toLocaleString(cur?.locale ?? "en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+}
+
 /** Common time zones offered in the cafe form. */
 export const TIME_ZONES = [
   "Asia/Kolkata", "Asia/Dubai", "Asia/Riyadh", "Asia/Qatar", "Asia/Kuwait", "Asia/Muscat", "Asia/Bahrain",

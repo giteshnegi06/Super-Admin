@@ -28,6 +28,11 @@ export type CreateClientInput = z.infer<typeof createClientSchema>;
 
 export const updateClientSchema = createClientSchema.omit({ slug: true, provisionNow: true }).partial();
 
+export const commissionSchema = z.object({
+  commissionEnabled: z.coerce.boolean().default(false),
+  commissionPercent: z.coerce.number().min(0, "Cannot be negative").max(100, "Cannot exceed 100%"),
+});
+
 export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),

@@ -57,6 +57,13 @@ model Client {
   status  ClientStatus @default(ACTIVE)
   notes   String?
 
+  // ── Platform commission ("cut") taken on this cafe's orders ──
+  // Off by default for existing/new cafes; a super admin turns it on and
+  // sets the percentage per client. Applied to revenue (subtotal + service
+  // charge) read live from the cafe's own database — never stored per order.
+  commissionEnabled Boolean @default(false)
+  commissionPercent Float   @default(0)
+
   // ── Tenant database (a database inside the shared Neon project) ──
   provisionStatus     ProvisionStatus @default(PENDING)
   provisionError      String?

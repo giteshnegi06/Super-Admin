@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Store, IndianRupee, Armchair, CalendarDays } from "lucide-react";
+import { Store, IndianRupee, Armchair, CalendarDays, Percent } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { snapshotsFor } from "@/lib/metrics";
 import { PageHeader } from "@/components/page-header";
@@ -11,14 +11,19 @@ import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
-import { money } from "@/lib/currencies";
+import { money, moneyPrecise } from "@/lib/currencies";
 
 /** Sum a field per currency and render as "₹9,523 · $120". Cafes in different currencies are never added together. */
-function perCurrency(snaps: { currency: string; [k: string]: unknown }[], field: "todayRevenue" | "monthRevenue") {
+function perCurrency(
+  snaps: { currency: string; [k: string]: unknown }[],
+  field: "todayRevenue" | "monthRevenue" | "todayCommission" | "monthCommission",
+  precise = false,
+) {
   const totals = new Map<string, number>();
   for (const s of snaps) totals.set(s.currency, (totals.get(s.currency) ?? 0) + (s[field] as number));
   if (totals.size === 0) return "₹0";
-  return [...totals.entries()].map(([sym, n]) => money(n, sym)).join(" · ");
+  const fmt = precise ? moneyPrecise : money;
+  return [...totals.entries()].map(([sym, n]) => fmt(n, sym)).join(" · ");
 }
 
 export default async function DashboardPage() {
@@ -38,6 +43,7 @@ export default async function DashboardPage() {
   const monthOrders = snaps.reduce((a, s) => a + s.monthOrders, 0);
   const tables = snaps.reduce((a, s) => a + s.tables, 0);
   const activeOrders = snaps.reduce((a, s) => a + s.activeOrders, 0);
+  const cutCafes = clients.filter((c) => c.commissionEnabled).length;
 
   return (
     <>
@@ -50,6 +56,13 @@ export default async function DashboardPage() {
         <StatCard label="Tables across cafes" value={tables} sub={`${activeOrders} orders in progress`} icon={Armchair} />
         <StatCard label="Cafes" value={total} sub={`${active} active · ${suspended} suspended${failed ? ` · ${failed} failed` : ""}`} icon={Store} />
       </div>
+
+      {cutCafes > 0 && (
+        <div className="mb-8 grid gap-4 sm:grid-cols-2">
+          <StatCard label="Your cut · today" value={perCurrency(snaps, "todayCommission", true)} sub={`${cutCafes} cafe${cutCafes === 1 ? "" : "s"} on commission`} icon={Percent} />
+          <StatCard label="Your cut · this month" value={perCurrency(snaps, "monthCommission", true)} sub={`${cutCafes} cafe${cutCafes === 1 ? "" : "s"} on commission`} icon={Percent} />
+        </div>
+      )}
 
       <div className="space-y-6">
         <Card>

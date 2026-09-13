@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import type { ClientStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireRole, logActivity } from "@/lib/auth";
-import { createClientSchema, updateClientSchema } from "@/lib/validations";
+import { createClientSchema, updateClientSchema, commissionSchema } from "@/lib/validations";
 import { provisionClient, deprovisionClient, attachExistingDatabase, resetOwnerPassword } from "@/lib/provisioning";
 import type { ActionResult } from "@/types";
 
@@ -88,6 +88,25 @@ export async function attachDatabaseAction(id: string, _prev: ActionResult | nul
   }
   revalidatePath(`/clients/${id}`);
   return { ok: true, message: `Linked database "${dbName}"` };
+}
+
+/** Set whether the platform takes a cut of this cafe's orders, and at what %. Super admin only. */
+export async function updateCommissionAction(id: string, _prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
+  const session = await requireRole("SUPER_ADMIN");
+  const parsed = commissionSchema.safeParse({
+    commissionEnabled: formData.get("commissionEnabled") === "on",
+    commissionPercent: formData.get("commissionPercent"),
+  });
+  if (!parsed.success) {
+    return { ok: false, error: "Please fix the highlighted fields", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  const { commissionEnabled, commissionPercent } = parsed.data;
+  await prisma.client.update({ where: { id }, data: { commissionEnabled, commissionPercent } });
+  await logActivity(commissionEnabled ? "client.commission.enabled" : "client.commission.disabled", {
+    clientId: id, adminId: session.sub, details: { commissionPercent },
+  });
+  revalidatePath(`/clients/${id}`);
+  return { ok: true, message: "Commission settings saved" };
 }
 
 /** Generate a new app password for the cafe owner. */
