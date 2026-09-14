@@ -3,7 +3,8 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Store, Settings, LogOut, Plus } from "lucide-react";
+import { useState } from "react";
+import { LayoutDashboard, Store, Settings, LogOut, Plus, Menu, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { logoutAction } from "@/actions/auth";
 
@@ -13,21 +14,20 @@ const nav = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function Sidebar({ user }: { user: { name: string; email: string; role: string } }) {
+function SidebarBody({ user, onNavigate }: { user: { name: string; email: string; role: string }; onNavigate?: () => void }) {
   const pathname = usePathname();
   const initials = user.name.split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
   return (
-    <aside className="sticky top-0 flex h-screen w-64 shrink-0 flex-col bg-ink-950 text-ink-300">
-      {/* Brand */}
+    <>
       <div className="px-6 pb-4 pt-7">
-        <Link href="/dashboard" className="block">
+        <Link href="/dashboard" className="block" onClick={onNavigate}>
           <Image src="/brand/chotu-logo.png" alt="Chotu" width={150} height={78} priority className="h-auto w-[150px]" />
         </Link>
         <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-500">Super Admin</div>
       </div>
 
       <div className="px-4">
-        <Link href="/clients/new"
+        <Link href="/clients/new" onClick={onNavigate}
           className="flex h-10 items-center justify-center gap-2 rounded-lg bg-brand-500 text-sm font-semibold text-white shadow-pop transition hover:bg-brand-400">
           <Plus size={16} /> Add cafe
         </Link>
@@ -40,6 +40,7 @@ export function Sidebar({ user }: { user: { name: string; email: string; role: s
             <Link
               key={href}
               href={href}
+              onClick={onNavigate}
               className={cn(
                 "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition",
                 active ? "bg-white/10 text-white" : "text-ink-400 hover:bg-white/5 hover:text-white",
@@ -52,7 +53,6 @@ export function Sidebar({ user }: { user: { name: string; email: string; role: s
         })}
       </nav>
 
-      {/* User */}
       <div className="border-t border-white/10 p-4">
         <div className="flex items-center gap-3">
           <div className="grid h-9 w-9 place-items-center rounded-full bg-brand-500/20 text-xs font-bold text-brand-300 ring-1 ring-brand-500/30">{initials}</div>
@@ -67,6 +67,50 @@ export function Sidebar({ user }: { user: { name: string; email: string; role: s
           </form>
         </div>
       </div>
-    </aside>
+    </>
+  );
+}
+
+export function Sidebar({ user }: { user: { name: string; email: string; role: string } }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      {/* Mobile / tablet top bar */}
+      <div className="sticky top-0 z-40 flex items-center justify-between border-b border-white/10 bg-ink-950 px-4 py-3 lg:hidden">
+        <Link href="/dashboard" className="block">
+          <Image src="/brand/chotu-logo.png" alt="Chotu" width={110} height={57} className="h-auto w-[110px]" />
+        </Link>
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="Open menu"
+          className="rounded-md p-2 text-ink-300 transition hover:bg-white/10 hover:text-white"
+        >
+          <Menu size={22} />
+        </button>
+      </div>
+
+      {/* Mobile / tablet drawer */}
+      {open && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
+          <aside className="relative flex h-full w-72 max-w-[85vw] flex-col bg-ink-950 text-ink-300 shadow-xl">
+            <button
+              onClick={() => setOpen(false)}
+              aria-label="Close menu"
+              className="absolute right-3 top-3 rounded-md p-1.5 text-ink-400 transition hover:bg-white/10 hover:text-white"
+            >
+              <X size={18} />
+            </button>
+            <SidebarBody user={user} onNavigate={() => setOpen(false)} />
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop sidebar */}
+      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col bg-ink-950 text-ink-300 lg:flex">
+        <SidebarBody user={user} />
+      </aside>
+    </>
   );
 }

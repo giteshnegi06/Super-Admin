@@ -38,27 +38,33 @@ export async function cafeMetrics(clientId: string): Promise<CafeMetrics | null>
   const sql = connect(decrypt(client.dbConnectionEncrypted));
   const tz = client.timeZone || "Asia/Kolkata";
   const start = Date.now();
+  const pct = client.commissionEnabled ? client.commissionPercent / 100 : 0;
 
   const [cafeRows, summary, tables, menu, days, months] = await Promise.all([
     sql.query(`SELECT id, name, is_accepting_orders, currency FROM cafes LIMIT 1`),
     sql.query(
       `WITH o AS (
-         SELECT (created_at AT TIME ZONE $1)::date AS d, subtotal, service_charge, status FROM orders
+         SELECT (created_at AT TIME ZONE $1)::date AS d, subtotal, service_charge, status,
+                round((subtotal + COALESCE(service_charge,0)) * $2, 2) AS commission
+         FROM orders
        ), today AS (SELECT (now() AT TIME ZONE $1)::date AS d)
        SELECT
          count(*) FILTER (WHERE o.status <> 'cancelled' AND o.d = today.d)::int                                  AS today_orders,
          COALESCE(sum(subtotal + COALESCE(service_charge,0)) FILTER (WHERE o.status <> 'cancelled' AND o.d = today.d), 0) AS today_rev,
+         COALESCE(sum(commission) FILTER (WHERE o.status <> 'cancelled' AND o.d = today.d), 0)                    AS today_comm,
          count(*) FILTER (WHERE o.status <> 'cancelled' AND o.d = today.d - 1)::int                              AS yday_orders,
          COALESCE(sum(subtotal + COALESCE(service_charge,0)) FILTER (WHERE o.status <> 'cancelled' AND o.d = today.d - 1), 0) AS yday_rev,
          count(*) FILTER (WHERE o.status <> 'cancelled' AND date_trunc('month', o.d) = date_trunc('month', today.d))::int AS month_orders,
          COALESCE(sum(subtotal + COALESCE(service_charge,0)) FILTER (WHERE o.status <> 'cancelled' AND date_trunc('month', o.d) = date_trunc('month', today.d)), 0) AS month_rev,
+         COALESCE(sum(commission) FILTER (WHERE o.status <> 'cancelled' AND date_trunc('month', o.d) = date_trunc('month', today.d)), 0) AS month_comm,
          count(*) FILTER (WHERE o.status <> 'cancelled' AND date_trunc('month', o.d) = date_trunc('month', today.d) - interval '1 month')::int AS lmonth_orders,
          COALESCE(sum(subtotal + COALESCE(service_charge,0)) FILTER (WHERE o.status <> 'cancelled' AND date_trunc('month', o.d) = date_trunc('month', today.d) - interval '1 month'), 0) AS lmonth_rev,
          count(*) FILTER (WHERE o.status <> 'cancelled')::int                                                    AS all_orders,
          COALESCE(sum(subtotal + COALESCE(service_charge,0)) FILTER (WHERE o.status <> 'cancelled'), 0)           AS all_rev,
+         COALESCE(sum(commission) FILTER (WHERE o.status <> 'cancelled'), 0)                                      AS all_comm,
          count(*) FILTER (WHERE o.status NOT IN ('served','cancelled'))::int                                      AS active_orders
        FROM o, today`,
-      [tz],
+      [tz, pct],
     ),
     sql.query(
       `SELECT count(*)::int AS total,
@@ -123,9 +129,9 @@ export async function cafeMetrics(clientId: string): Promise<CafeMetrics | null>
     commission: client.commissionEnabled
       ? {
           percent: client.commissionPercent,
-          today: Number(s.today_rev) * (client.commissionPercent / 100),
-          thisMonth: Number(s.month_rev) * (client.commissionPercent / 100),
-          allTime: Number(s.all_rev) * (client.commissionPercent / 100),
+          today: Number(s.today_comm),
+          thisMonth: Number(s.month_comm),
+          allTime: Number(s.all_comm),
         }
       : undefined,
   };
@@ -149,27 +155,32 @@ export async function cafeSnapshot(clientId: string): Promise<CafeSnapshot> {
   try {
     const sql = connect(decrypt(client.dbConnectionEncrypted));
     const tz = client.timeZone || "Asia/Kolkata";
+    const pct = client.commissionEnabled ? client.commissionPercent / 100 : 0;
     const [r] = await sql.query(
-      `WITH o AS (SELECT (created_at AT TIME ZONE $1)::date AS d, subtotal, service_charge, status FROM orders),
-            today AS (SELECT (now() AT TIME ZONE $1)::date AS d)
+      `WITH o AS (
+         SELECT (created_at AT TIME ZONE $1)::date AS d, subtotal, service_charge, status,
+                round((subtotal + COALESCE(service_charge,0)) * $2, 2) AS commission
+         FROM orders
+       ), today AS (SELECT (now() AT TIME ZONE $1)::date AS d)
        SELECT
          COALESCE(sum(subtotal + COALESCE(service_charge,0)) FILTER (WHERE status <> 'cancelled' AND o.d = today.d), 0) AS today_rev,
+         COALESCE(sum(commission) FILTER (WHERE status <> 'cancelled' AND o.d = today.d), 0) AS today_comm,
          count(*) FILTER (WHERE status <> 'cancelled' AND o.d = today.d)::int AS today_orders,
          COALESCE(sum(subtotal + COALESCE(service_charge,0)) FILTER (WHERE status <> 'cancelled' AND date_trunc('month', o.d) = date_trunc('month', today.d)), 0) AS month_rev,
+         COALESCE(sum(commission) FILTER (WHERE status <> 'cancelled' AND date_trunc('month', o.d) = date_trunc('month', today.d)), 0) AS month_comm,
          count(*) FILTER (WHERE status <> 'cancelled' AND date_trunc('month', o.d) = date_trunc('month', today.d))::int AS month_orders,
          count(*) FILTER (WHERE status NOT IN ('served','cancelled'))::int AS active_orders,
          (SELECT count(*) FROM tables)::int AS tables,
          (SELECT currency FROM cafes LIMIT 1) AS currency
        FROM o, today`,
-      [tz],
+      [tz, pct],
     );
-    const pct = client.commissionEnabled ? client.commissionPercent / 100 : 0;
     return {
       clientId,
       todayRevenue: Number(r.today_rev), todayOrders: r.today_orders,
       monthRevenue: Number(r.month_rev), monthOrders: r.month_orders,
       tables: r.tables, activeOrders: r.active_orders, currency: r.currency ?? "₹",
-      todayCommission: Number(r.today_rev) * pct, monthCommission: Number(r.month_rev) * pct,
+      todayCommission: Number(r.today_comm), monthCommission: Number(r.month_comm),
     };
   } catch (e) {
     return { ...empty, error: e instanceof Error ? e.message : String(e) };

@@ -36,7 +36,7 @@ export function CommissionForm({ client }: { client: Client }) {
       <Field
         label="Commission %"
         error={err.commissionPercent}
-        hint="Applied to revenue (subtotal + service charge) on every order"
+        hint="Applied per order (subtotal + service charge), rounded and summed — not taken off the total revenue"
         className="max-w-[180px]"
       >
         <Input
