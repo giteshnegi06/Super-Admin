@@ -1,8 +1,8 @@
 /**
- * Provisioning pipeline — mirrors how "Negi's Kitchen" (database `QR-Order`)
- * is set up: one Postgres database per cafe inside the shared Neon project.
+ * Provisioning pipeline — every cafe lives as rows in ONE shared database,
+ * scoped by cafe_id (no more one Postgres database per cafe).
  *
- *   Client row → CREATE DATABASE → apply tenant-schema.sql → seed cafes/tables
+ *   Client row → ensure shared schema exists → insert cafes/admin_users/tables rows
  *
  * Each step updates `provisionStatus` so the UI can poll progress.
  */
@@ -13,56 +13,34 @@ import { logActivity } from "./auth";
 import { currencyByCode } from "./currencies";
 import { hashPassword, generatePassword, verifyPassword } from "./tenant-auth";
 import { TENANT_SCHEMA_SQL } from "./tenant-schema";
-import { adminSql, adminDbName, assertSafeDbName, connect, connectionStringFor, runSqlScript, type Sql } from "./tenant-db";
-
+import { sharedSql, runSqlScript, type Sql } from "./tenant-db";
 
 async function setStatus(clientId: string, provisionStatus: ProvisionStatus, extra: Record<string, unknown> = {}) {
   await prisma.client.update({ where: { id: clientId }, data: { provisionStatus, ...extra } });
 }
 
-/** Database name for a cafe, e.g. slug "blue-tokai" → "cafe_blue_tokai". */
-export function dbNameForSlug(slug: string) {
-  return `cafe_${slug.replace(/-/g, "_")}`;
+type CafeRowClient = {
+  cafeId: string; cafeName: string; tagline: string | null; address: string | null; ownerPhone: string | null; currency: string;
+};
+
+/** Push this client's editable cafe fields straight into its shared-DB `cafes` row — no re-provisioning needed. */
+export async function syncCafeRow(client: CafeRowClient) {
+  await sharedSql().query(
+    `UPDATE cafes SET name = $2, tagline = $3, address = $4, phone = $5, currency = $6, updated_at = now() WHERE id = $1`,
+    [client.cafeId, client.cafeName, client.tagline, client.address, client.ownerPhone, currencyByCode(client.currency).symbol],
+  );
 }
 
 export async function provisionClient(clientId: string, opts: { adminId?: string } = {}) {
   const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
 
   try {
-    // 1. Create the database (skip if this client already has one) ---------
-    let dbName = client.dbName;
-    let connectionUri: string;
-    if (dbName && client.dbConnectionEncrypted) {
-      connectionUri = decrypt(client.dbConnectionEncrypted);
-    } else {
-      dbName = dbNameForSlug(client.slug);
-      assertSafeDbName(dbName);
-      await setStatus(clientId, "CREATING_DATABASE", { provisionError: null });
-
-      const admin = adminSql();
-      const exists = await admin.query(`SELECT 1 FROM pg_database WHERE datname = $1`, [dbName]);
-      if (exists.length === 0) await admin.query(`CREATE DATABASE "${dbName}"`);
-
-      connectionUri = connectionStringFor(dbName);
-      const u = new URL(connectionUri);
-      await prisma.client.update({
-        where: { id: clientId },
-        data: {
-          dbName,
-          dbConnectionEncrypted: encrypt(connectionUri),
-          neonEndpointHost: u.hostname,
-          dbRoleName: u.username,
-          neonProjectId: process.env.NEON_PROJECT_ID ?? null,
-        },
-      });
-    }
-
-    // 2. Apply the product schema -----------------------------------------
-    await setStatus(clientId, "RUNNING_MIGRATIONS");
-    const sql = connect(connectionUri);
+    // 1. Make sure the shared schema exists (idempotent — safe to re-run) ---
+    await setStatus(clientId, "RUNNING_MIGRATIONS", { provisionError: null });
+    const sql = sharedSql();
     await runSqlScript(sql, TENANT_SCHEMA_SQL);
 
-    // 3. Seed the single cafe row, owner admin and starter tables ------------
+    // 2. Seed this cafe's row, owner admin and starter tables --------------
     await setStatus(clientId, "SEEDING");
     const cafeId = client.cafeId ?? client.slug;
     await sql.query(
@@ -88,8 +66,8 @@ export async function provisionClient(clientId: string, opts: { adminId?: string
       where: { id: clientId },
       data: { cafeId, provisionStatus: "READY", provisionedAt: new Date(), provisionError: null },
     });
-    await logActivity("client.provisioned", { clientId, adminId: opts.adminId, details: { dbName } });
-    return { ok: true as const, dbName };
+    await logActivity("client.provisioned", { clientId, adminId: opts.adminId, details: { cafeId } });
+    return { ok: true as const, cafeId };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await setStatus(clientId, "FAILED", { provisionError: message });
@@ -98,23 +76,18 @@ export async function provisionClient(clientId: string, opts: { adminId?: string
   }
 }
 
-/** Permanently DROP the cafe's database. */
+/** Remove this cafe's rows from the shared database (cascades through every child table). */
 export async function deprovisionClient(clientId: string, opts: { adminId?: string } = {}) {
   const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
-  if (!client.dbName) return { ok: true as const };
-  if (client.dbName === adminDbName()) throw new Error("Refusing to drop the Admin database");
-  assertSafeDbName(client.dbName);
+  if (!client.cafeId) return { ok: true as const };
   await setStatus(clientId, "DELETING");
   try {
-    await adminSql().query(`DROP DATABASE IF EXISTS "${client.dbName}" WITH (FORCE)`);
+    await sharedSql().query(`DELETE FROM cafes WHERE id = $1`, [client.cafeId]);
     await prisma.client.update({
       where: { id: clientId },
-      data: {
-        provisionStatus: "PENDING",
-        dbName: null, dbConnectionEncrypted: null, neonEndpointHost: null, dbRoleName: null, provisionedAt: null,
-      },
+      data: { provisionStatus: "PENDING", provisionedAt: null },
     });
-    await logActivity("client.deprovisioned", { clientId, adminId: opts.adminId, details: { dbName: client.dbName } });
+    await logActivity("client.deprovisioned", { clientId, adminId: opts.adminId, details: { cafeId: client.cafeId } });
     return { ok: true as const };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -123,45 +96,15 @@ export async function deprovisionClient(clientId: string, opts: { adminId?: stri
   }
 }
 
-/**
- * Register an already-existing cafe database (e.g. the original `QR-Order`
- * database for Negi's Kitchen) as a client without creating anything.
- */
-export async function attachExistingDatabase(clientId: string, dbName: string, opts: { adminId?: string } = {}) {
-  assertSafeDbName(dbName);
-  const connectionUri = connectionStringFor(dbName);
-  const sql = connect(connectionUri);
-  const cafes = await sql.query(`SELECT id, name FROM cafes LIMIT 1`);
-  if (cafes.length === 0) throw new Error(`Database "${dbName}" has no cafes row`);
-  const u = new URL(connectionUri);
-  await prisma.client.update({
-    where: { id: clientId },
-    data: {
-      dbName,
-      cafeId: cafes[0].id as string,
-      dbConnectionEncrypted: encrypt(connectionUri),
-      neonEndpointHost: u.hostname,
-      dbRoleName: u.username,
-      neonProjectId: process.env.NEON_PROJECT_ID ?? null,
-      provisionStatus: "READY",
-      provisionedAt: new Date(),
-      provisionError: null,
-    },
-  });
-  await logActivity("client.attached_existing_db", { clientId, adminId: opts.adminId, details: { dbName } });
-  // Existing databases (e.g. QR-Order) predate real logins — give the owner one now.
-  const fresh = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
-  await ensureOwnerLogin(sql, fresh);
-}
-
 type OwnerLoginClient = {
   id: string; cafeId: string | null; ownerName: string; ownerEmail: string; ownerPasswordEncrypted: string | null;
 };
 
 /**
- * Make sure the owner has a working admin login in the cafe database.
- * The password is generated once and kept (encrypted) on the Client so it can
- * be shown / copied from the admin; pass `reset: true` to rotate it.
+ * Make sure the owner has a working admin login for this cafe (cafe_id-scoped)
+ * in the shared database. The password is generated once and kept (encrypted)
+ * on the Client so it can be shown / copied from the admin; pass `reset: true`
+ * to rotate it.
  */
 export async function ensureOwnerLogin(sql: Sql, client: OwnerLoginClient, opts: { reset?: boolean } = {}) {
   if (!client.cafeId) throw new Error("Client has no cafe id");
@@ -170,11 +113,10 @@ export async function ensureOwnerLogin(sql: Sql, client: OwnerLoginClient, opts:
   const password = needsPassword ? generatePassword() : decrypt(client.ownerPasswordEncrypted!);
   const hash = hashPassword(password);
 
-  await sql.query(`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS password_hash text`);
   await sql.query(
     `INSERT INTO admin_users (id, cafe_id, name, email, role, password_hash)
      VALUES ($1, $2, $3, $4, 'admin', $5)
-     ON CONFLICT (email) DO UPDATE SET
+     ON CONFLICT (cafe_id, email) DO UPDATE SET
        name = EXCLUDED.name,
        role = 'admin',
        -- keep the password the owner already has unless we are (re)setting it
@@ -194,29 +136,30 @@ export async function ensureOwnerLogin(sql: Sql, client: OwnerLoginClient, opts:
 /** Rotate the cafe owner's app password. */
 export async function resetOwnerPassword(clientId: string, opts: { adminId?: string } = {}) {
   const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
-  if (!client.dbConnectionEncrypted || !client.cafeId) throw new Error("Cafe database is not provisioned yet");
-  const sql = connect(decrypt(client.dbConnectionEncrypted));
-  const creds = await ensureOwnerLogin(sql, client, { reset: true });
+  if (!client.cafeId) throw new Error("Cafe is not provisioned yet");
+  const creds = await ensureOwnerLogin(sharedSql(), client, { reset: true });
   await logActivity("client.owner_password_reset", { clientId, adminId: opts.adminId });
   return creds;
 }
 
 export type OwnerLoginStatus =
-  | { state: "missing" }                          // no admin_users row / no hash in the cafe DB
-  | { state: "ok"; password: string }             // admin's stored password matches the cafe DB
+  | { state: "missing" }                          // no admin_users row / no hash for this cafe
+  | { state: "ok"; password: string }             // admin's stored password matches the shared DB
   | { state: "changed_in_app"; hasStored: boolean }; // owner changed it from their console
 
 /**
- * Compare the password the admin holds with the live hash in the cafe DB.
+ * Compare the password the admin holds with the live hash in the shared DB.
  * Read on every render so a password changed from the cafe console is
  * reported instead of silently showing a stale value.
  */
 export async function ownerLoginStatus(client: {
-  dbConnectionEncrypted: string | null; ownerEmail: string; ownerPasswordEncrypted: string | null;
+  cafeId: string | null; ownerEmail: string; ownerPasswordEncrypted: string | null;
 }): Promise<OwnerLoginStatus> {
-  if (!client.dbConnectionEncrypted) return { state: "missing" };
-  const sql = connect(decrypt(client.dbConnectionEncrypted));
-  const [row] = await sql.query(`SELECT password_hash FROM admin_users WHERE email = $1`, [client.ownerEmail.toLowerCase()]);
+  if (!client.cafeId) return { state: "missing" };
+  const [row] = await sharedSql().query(
+    `SELECT password_hash FROM admin_users WHERE cafe_id = $1 AND email = $2`,
+    [client.cafeId, client.ownerEmail.toLowerCase()],
+  );
   if (!row?.password_hash) return { state: "missing" };
   if (!client.ownerPasswordEncrypted) return { state: "changed_in_app", hasStored: false };
   const password = decrypt(client.ownerPasswordEncrypted);

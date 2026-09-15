@@ -44,7 +44,7 @@ export function ClientForm({ client }: { client?: Client }) {
           <Field label="State / Region" error={err.state}><Input name="state" defaultValue={client?.state ?? ""} /></Field>
           <Field label="Country" error={err.country}><Input name="country" defaultValue={client?.country ?? "India"} /></Field>
           <Field label="Tax ID (GST / VAT / TRN)" error={err.gstNumber}><Input name="gstNumber" defaultValue={client?.gstNumber ?? ""} /></Field>
-          <Field label="Currency" error={err.currency} hint={isEdit ? "Re-run schema on the cafe page to push a change to the app" : "Shown on the menu and bills in the app"}>
+          <Field label="Currency" error={err.currency} hint="Shown on the menu and bills in the app — saved changes apply immediately">
             <Select name="currency" defaultValue={client?.currency ?? "INR"}>
               {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.symbol.trim()} · {c.name}</option>)}
             </Select>
@@ -78,7 +78,7 @@ export function ClientForm({ client }: { client?: Client }) {
       {!isEdit && (
         <label className="flex items-center gap-2 text-sm text-ink-700">
           <input type="checkbox" name="provisionNow" defaultChecked className="h-4 w-4 rounded border-ink-300 text-brand-600" />
-          Create this cafe's database right away (like QR-Order for Negi's Kitchen)
+          Provision this cafe in the shared database right away
         </label>
       )}
 

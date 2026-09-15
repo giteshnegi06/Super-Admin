@@ -1,5 +1,6 @@
 /**
- * AES-256-GCM encryption for tenant connection strings stored in the admin DB.
+ * AES-256-GCM encryption for the cafe owner's app password, kept on the
+ * Client row so a super admin can reveal/re-share it.
  * Format: base64(iv):base64(authTag):base64(ciphertext)
  */
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
@@ -27,9 +28,4 @@ export function decrypt(payload: string): string {
   const decipher = createDecipheriv("aes-256-gcm", key(), Buffer.from(ivB, "base64"));
   decipher.setAuthTag(Buffer.from(tagB, "base64"));
   return Buffer.concat([decipher.update(Buffer.from(encB, "base64")), decipher.final()]).toString("utf8");
-}
-
-/** Hide the password in a connection string for display. */
-export function maskConnectionString(uri: string): string {
-  return uri.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:********@");
 }

@@ -64,17 +64,11 @@ model Client {
   commissionEnabled Boolean @default(false)
   commissionPercent Float   @default(0)
 
-  // ── Tenant database (a database inside the shared Neon project) ──
+  // ── Tenant data (rows in the one shared database, scoped by cafe_id) ──
   provisionStatus     ProvisionStatus @default(PENDING)
   provisionError      String?
-  // cafes.id inside the tenant DB (the app reads the single cafes row)
-  cafeId              String?
-  dbName              String?  @unique
-  neonProjectId       String?
-  neonEndpointHost    String?
-  dbRoleName          String?
-  // AES-256-GCM encrypted connection string (see src/lib/crypto.ts)
-  dbConnectionEncrypted String?
+  // cafes.id in the shared DB — the tenant key used on every scoped query
+  cafeId              String? @unique
   // Cafe-admin login for the QR-Ordering app: email = ownerEmail, password kept
   // AES-256-GCM encrypted so a super admin can reveal / re-share it
   ownerPasswordEncrypted String?

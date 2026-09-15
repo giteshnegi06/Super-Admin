@@ -40,7 +40,7 @@ export function ClientTable({ clients, snapshots = {} }: { clients: ClientRow[];
                     <Avatar name={c.cafeName} />
                     <div className="min-w-0">
                       <div className="truncate font-medium text-ink-900 hover:text-brand-600">{c.cafeName}</div>
-                      <div className="truncate text-xs text-ink-500">{c.dbName ?? c.slug}{c.city ? ` · ${c.city}` : ""}</div>
+                      <div className="truncate text-xs text-ink-500">{c.cafeId ?? c.slug}{c.city ? ` · ${c.city}` : ""}</div>
                     </div>
                   </Link>
                 </td>

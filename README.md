@@ -1,35 +1,40 @@
 # QR Ordering — Super Admin
 
-Control panel for the QR-ordering system. Manage every cafe that bought the system, see each cafe's revenue and tables, and **provision a dedicated Neon Postgres database
-for each cafe** with one click.
+Control panel for the QR-ordering system. Manage every cafe that bought the
+system, see each cafe's revenue and tables, and provision a new cafe with one
+click — as rows in **one shared database**, scoped by `cafe_id`.
 
 ## Architecture
 
 ```
-Neon project "square-shadow-18088269" (one endpoint, many databases)
-┌─────────────────┐  ┌──────────────────┐  ┌──────────────────────┐  ┌───────────────┐
-│ Admin           │  │ QR-Order         │  │ cafe_<slug>          │  │ cafe_<slug2>  │ ...
-│ (this panel)    │  │ Negi's Kitchen   │  │ new cafe             │  │               │
-│ clients, plans, │  │ cafes, tables,   │  │ same schema, seeded  │  │               │
-│ payments, logs  │  │ orders, menu ... │  │ by "Add cafe"        │  │               │
-└─────────────────┘  └────────▲─────────┘  └──────────▲───────────┘  └───────────────┘
-                              │ DATABASE_URL           │ DATABASE_URL
-                     qr-ordering-sable.vercel.app   <cafe>.vercel.app  (one QR-Ordering deploy per cafe)
+Admin DB (Neon)                     Shared DB (Neon) — every cafe, one database
+┌─────────────────┐                 ┌──────────────────────────────────────┐
+│ clients, plans,  │  cafeId ──────▶ │ cafes / admin_users / categories /   │
+│ payments, logs   │                 │ menu_items / tables / orders / ...   │
+│ (this panel)     │                 │ every row scoped by cafe_id          │
+└─────────────────┘                 └───────────────▲──────────────────────┘
+                                                     │ DATABASE_URL (same for every cafe)
+                                          cafeBackend — ONE deployment
+                                          serves every cafe's frontend
 ```
 
 * **Admin DB** – `Admin` database. Holds `AdminUser`, `Client`, `ActivityLog` (see `prisma/schema.prisma`).
-* **Cafe DB** – one database per cafe *inside the same Neon project*, exactly
-  like `QR-Order` for Negi's Kitchen. Created with `CREATE DATABASE` (the
-  `neondb_owner` role has CREATEDB, so no Neon API key is needed), then
-  `src/lib/tenant-schema.ts` — a 1:1 copy of the live product schema — is
-  applied and the single `cafes` row, owner `admin_users` row and
-  `Table 01…N` rows are seeded. The connection string is stored AES-256-GCM
-  encrypted on the `Client` row.
-* **Metrics** – the panel reads each cafe DB directly (Neon HTTP driver) for
-  today / this-month / last-month / all-time revenue, order counts, table
-  count, occupied tables, active orders and menu size. Revenue is computed the
-  same way as the product's `/api/revenue/daily`: `subtotal + service_charge`,
-  cancelled orders excluded, bucketed by business day in the cafe's time zone.
+* **Shared DB** – one database for every cafe. Provisioning a cafe means
+  inserting its `cafes` row, an owner `admin_users` row and `Table 01…N` rows
+  — no new database, no new deployment. `src/lib/tenant-schema.ts` (applied
+  once, idempotently) is the schema every cafe's data lives under. Removing a
+  cafe is a single `DELETE FROM cafes WHERE id = ...`; every child table
+  cascades via FK.
+* **cafeBackend** (separate repo) is the API every cafe's frontend calls —
+  one deployment for all cafes. Staff/admin requests carry a JWT with the
+  logged-in user's `cafe_id`; every query is scoped by it so one cafe can
+  never read or write another's data.
+* **Metrics** – the panel reads the shared DB directly (Neon HTTP driver),
+  filtered by `cafe_id`, for today / this-month / last-month / all-time
+  revenue, order counts, table count, occupied tables, active orders and menu
+  size. Revenue is computed the same way as the product's
+  `/api/revenue/daily`: `subtotal + service_charge`, cancelled orders
+  excluded, bucketed by business day in the cafe's time zone.
 
 ## File structure
 

@@ -11,6 +11,8 @@ function required(name: string): string {
 
 export const env = {
   get DATABASE_URL() { return required("DATABASE_URL"); },
+  /** The one shared Postgres database every cafe's tenant data lives in (multi-tenant, scoped by cafe_id). */
+  get SHARED_DB_URL() { return required("SHARED_DB_URL"); },
   get SESSION_SECRET() { return required("SESSION_SECRET"); },
   get ENCRYPTION_KEY() { return required("ENCRYPTION_KEY"); },
   get NEON_PROJECT_ID() { return process.env.NEON_PROJECT_ID ?? ""; },

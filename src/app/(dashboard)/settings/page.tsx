@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { adminDbName, listDatabases } from "@/lib/tenant-db";
+import { sharedSql } from "@/lib/tenant-db";
+import { env } from "@/lib/env";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,25 +19,29 @@ export default async function SettingsPage() {
   const session = await getSession();
   const [admins, clients] = await Promise.all([
     prisma.adminUser.findMany({ orderBy: { createdAt: "asc" } }),
-    prisma.client.findMany({ select: { dbName: true, cafeName: true } }),
+    prisma.client.findMany({ select: { cafeId: true, cafeName: true, provisionStatus: true } }),
   ]);
-  const byDb = new Map(clients.filter((c) => c.dbName).map((c) => [c.dbName!, c.cafeName]));
 
-  let dbs: { name: string; sizeBytes: number }[] = [];
+  let sizeBytes = 0;
   let dbError: string | null = null;
-  try { dbs = await listDatabases(); } catch (e) { dbError = e instanceof Error ? e.message : String(e); }
-  const host = new URL(process.env.DATABASE_URL!).hostname;
+  try {
+    const [row] = await sharedSql().query(`SELECT pg_database_size(current_database())::bigint AS size`);
+    sizeBytes = Number(row.size);
+  } catch (e) { dbError = e instanceof Error ? e.message : String(e); }
+  const host = new URL(env.SHARED_DB_URL).hostname;
+  const dbName = new URL(env.SHARED_DB_URL).pathname.replace(/^\//, "");
 
   return (
     <>
-      <PageHeader eyebrow="System" title="Settings" description="Neon project, databases and admin team" />
+      <PageHeader eyebrow="System" title="Settings" description="Shared database and admin team" />
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
-          <CardHeader title="Neon project" description="All cafe databases live on this endpoint"
+          <CardHeader title="Shared database" description="Every cafe's data lives here, scoped by cafe_id"
             action={<Badge color={dbError ? "red" : "green"}>{dbError ? "Error" : "Connected"}</Badge>} />
           <CardBody className="space-y-2 text-sm">
             <div className="flex justify-between"><span className="text-ink-500">Host</span><span className="font-mono text-xs">{host}</span></div>
-            <div className="flex justify-between"><span className="text-ink-500">Admin database</span><span className="font-mono text-xs">{adminDbName()}</span></div>
+            <div className="flex justify-between"><span className="text-ink-500">Database</span><span className="font-mono text-xs">{dbName}</span></div>
+            <div className="flex justify-between"><span className="text-ink-500">Size</span><span className="font-mono text-xs">{bytes(sizeBytes)}</span></div>
             {process.env.NEON_PROJECT_ID && (
               <div className="flex justify-between"><span className="text-ink-500">Project</span>
                 <a className="font-mono text-xs text-brand-600 hover:underline" target="_blank" href={`https://console.neon.tech/app/projects/${process.env.NEON_PROJECT_ID}`}>{process.env.NEON_PROJECT_ID}</a>
@@ -47,16 +52,14 @@ export default async function SettingsPage() {
           <div className="border-t border-ink-100">
             <table className="min-w-full text-sm">
               <thead className="table-head">
-                <tr><th>Database</th><th>Cafe</th><th className="text-right">Size</th></tr>
+                <tr><th>Cafe</th><th>cafe_id</th><th className="text-right">Status</th></tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
-                {dbs.map((d) => (
-                  <tr key={d.name} className="table-row">
-                    <td className="font-mono text-xs">{d.name}</td>
-                    <td className="text-xs">
-                      {byDb.get(d.name) ?? (d.name === adminDbName() ? <span className="text-ink-400">this admin panel</span> : <span className="text-ink-400">not linked</span>)}
-                    </td>
-                    <td className="tabular text-right text-xs">{bytes(d.sizeBytes)}</td>
+                {clients.map((c) => (
+                  <tr key={c.cafeId ?? c.cafeName} className="table-row">
+                    <td className="text-xs">{c.cafeName}</td>
+                    <td className="font-mono text-xs">{c.cafeId ?? <span className="text-ink-400">not provisioned</span>}</td>
+                    <td className="text-right text-xs">{c.provisionStatus}</td>
                   </tr>
                 ))}
               </tbody>
