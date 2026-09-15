@@ -113,16 +113,31 @@ export async function ensureOwnerLogin(sql: Sql, client: OwnerLoginClient, opts:
   const password = needsPassword ? generatePassword() : decrypt(client.ownerPasswordEncrypted!);
   const hash = hashPassword(password);
 
+  // The deterministic id `admin-${cafeId}` can already be taken by an
+  // unrelated real account under a different email — e.g. a cafe migrated
+  // from a standalone system that already had its own admin login before
+  // Super-Admin ever managed it. Reuse this owner's existing row (by email)
+  // if there is one; otherwise pick an id that isn't already someone else's,
+  // so this never overwrites a distinct, real staff account.
+  const defaultId = `admin-${client.cafeId}`;
+  const [ownRow] = await sql.query(`SELECT id FROM admin_users WHERE cafe_id = $1 AND email = $2`, [client.cafeId, email]);
+  let id: string = ownRow?.id ?? defaultId;
+  if (!ownRow) {
+    const [taken] = await sql.query(`SELECT 1 FROM admin_users WHERE cafe_id = $1 AND id = $2`, [client.cafeId, defaultId]);
+    if (taken) id = `owner-${client.cafeId}`;
+  }
+
   await sql.query(
     `INSERT INTO admin_users (id, cafe_id, name, email, role, password_hash)
      VALUES ($1, $2, $3, $4, 'admin', $5)
-     ON CONFLICT (cafe_id, email) DO UPDATE SET
+     ON CONFLICT (cafe_id, id) DO UPDATE SET
        name = EXCLUDED.name,
+       email = EXCLUDED.email,
        role = 'admin',
        -- keep the password the owner already has unless we are (re)setting it
        password_hash = CASE WHEN $6::boolean OR admin_users.password_hash IS NULL
                             THEN EXCLUDED.password_hash ELSE admin_users.password_hash END`,
-    [`admin-${client.cafeId}`, client.cafeId, client.ownerName, email, hash, needsPassword],
+    [id, client.cafeId, client.ownerName, email, hash, needsPassword],
   );
   if (needsPassword) {
     await prisma.client.update({
